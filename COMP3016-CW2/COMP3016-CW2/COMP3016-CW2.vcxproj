@@ -76,12 +76,12 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;$(SolutionDir)\External\assimp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;$(SolutionDir)\External\assimp\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glew32.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -93,12 +93,12 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;$(SolutionDir)\External\assimp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;$(SolutionDir)\External\assimp\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glew32.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -108,12 +108,12 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;$(SolutionDir)\External\assimp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;$(SolutionDir)\External\assimp\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glew32.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -125,17 +125,21 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\include;$(SolutionDir)\External\GLEW\glew-2.1.0\include;$(SolutionDir)\External\glm;$(SolutionDir)\External\assimp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)\External\GLEW\glew-2.1.0\lib\Release\x64;$(SolutionDir)\External\GLFW\glfw-3.4.bin.WIN64\lib-vc2022;$(SolutionDir)\External\assimp\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glew32.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\basic.frag" />
+    <None Include="shaders\basic.vert" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
