@@ -106,6 +106,9 @@ bool  gDayNightEnabled = true;
 float gCycleSeconds = 60.0f;  // full day length in seconds
 float gTimeScale = 1.0f;    // speed multiplier
 
+// Flashlight state
+bool flashlightOn = false; // starts off
+
 // Helpers
 static float clamp01(float v)
 {
@@ -192,7 +195,7 @@ static float lookUpFade(const glm::vec3& camFront)
     return smoothstepf(-0.15f, 0.20f, camFront.y);
 }
 
-// Shaders  main 
+// Shaders main 
 const char* vertexShaderSource = R"(
 #version 330 core
 
@@ -230,6 +233,15 @@ uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uViewPos;
 
+// Flashlight uniforms (spotlight)
+uniform float uFlashOn;
+uniform vec3 uFlashPos;
+uniform vec3 uFlashDir;
+uniform vec3 uFlashColor;
+uniform float uFlashInnerCos;
+uniform float uFlashOuterCos;
+uniform float uFlashRange;
+
 void main()
 {
     vec4 texSample = texture(uTexture, TexCoord);
@@ -248,6 +260,37 @@ void main()
     vec3 specular = 0.20 * spec * uLightColor;
 
     vec3 result = (ambient + diffuse + specular) * texSample.rgb;
+
+    if (uFlashOn > 0.5)
+    {
+        // Vector from flashlight to fragment
+        vec3 LtoF = FragPos - uFlashPos; // from light to fragment
+        float dist = length(LtoF);
+
+        if (dist < uFlashRange)
+        {
+            vec3 Ldir = normalize(LtoF);
+            // spot factor by angle: dot between spot direction and vector to fragment
+            float cosTheta = dot(normalize(uFlashDir), Ldir);
+            float spot = smoothstep(uFlashOuterCos, uFlashInnerCos, cosTheta);
+
+            // attenuation by distance (soft inverse-square approximation)
+            float atten = 1.0 / (1.0 + 0.05 * dist * dist);
+
+            // lighting terms using light direction from fragment to light
+            vec3 L = normalize(uFlashPos - FragPos); // direction towards light
+            float fdiff = max(dot(norm, L), 0.0);
+            vec3 freflect = reflect(-L, norm);
+            float fspec = pow(max(dot(viewDir, freflect), 0.0), 32.0);
+
+            vec3 fDiffuse = 1.0 * fdiff * uFlashColor;
+            vec3 fSpec = 0.6 * fspec * uFlashColor;
+
+            float spotAtten = spot * atten;
+            result += (fDiffuse + fSpec) * spotAtten * texSample.rgb;
+        }
+    }
+
     FragColor = vec4(result, texSample.a);
 }
 )";
@@ -544,6 +587,13 @@ void key_callback(GLFWwindow* window, int key, int, int action, int)
 
     if (key == GLFW_KEY_J && action == GLFW_PRESS)
         gTimeScale = std::max(0.25f, gTimeScale - 0.25f);
+
+    // Toggle flashlight
+    if (key == GLFW_KEY_F && action == GLFW_PRESS)
+    {
+        flashlightOn = !flashlightOn;
+        std::cout << "Flashlight: " << (flashlightOn ? "ON" : "OFF") << "\n";
+    }
 }
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int)
@@ -1059,6 +1109,15 @@ int main()
     GLint modelLoc = glGetUniformLocation(shaderProgram, "u_Model");
     GLint mvpLoc = glGetUniformLocation(shaderProgram, "u_MVP");
 
+    // Flashlight uniform locations
+    GLint flashOnLoc = glGetUniformLocation(shaderProgram, "uFlashOn");
+    GLint flashPosLoc = glGetUniformLocation(shaderProgram, "uFlashPos");
+    GLint flashDirLoc = glGetUniformLocation(shaderProgram, "uFlashDir");
+    GLint flashColLoc = glGetUniformLocation(shaderProgram, "uFlashColor");
+    GLint flashInnerLoc = glGetUniformLocation(shaderProgram, "uFlashInnerCos");
+    GLint flashOuterLoc = glGetUniformLocation(shaderProgram, "uFlashOuterCos");
+    GLint flashRangeLoc = glGetUniformLocation(shaderProgram, "uFlashRange");
+
     // Billboard shader uniforms
     GLint bbMvpLoc = glGetUniformLocation(billboardProgram, "u_MVP");
     GLint bbColLoc = glGetUniformLocation(billboardProgram, "uColor");
@@ -1098,9 +1157,35 @@ int main()
 
         // Main draw
         glUseProgram(shaderProgram);
-        glUniform3fv(lightDirLoc, 1, glm::value_ptr(lightDir));
-        glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
-        glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
+
+        // Compute camera-relative flashlight origin and basis so spotlight is positioned at the hand
+        glm::vec3 camForward = glm::normalize(cameraFront);
+        glm::vec3 camRight = glm::normalize(glm::cross(camForward, cameraUp));
+        glm::vec3 camUp = glm::normalize(glm::cross(camRight, camForward));
+
+        const float handRight = 0.40f;
+        const float handUp = -0.28f;
+        const float handForward = 0.30f;
+
+        glm::vec3 flashPos = cameraPos + camRight * handRight + camUp * handUp + camForward * handForward;
+        glm::vec3 flashDir = camForward;
+
+        // If flashlight is on, provide flashlight uniforms 
+        if (flashOnLoc >= 0) glUniform1f(flashOnLoc, flashlightOn ? 1.0f : 0.0f);
+        if (flashPosLoc >= 0) glUniform3fv(flashPosLoc, 1, glm::value_ptr(flashPos));
+        if (flashDirLoc >= 0) glUniform3fv(flashDirLoc, 1, glm::value_ptr(flashDir));
+        if (flashColLoc >= 0)
+        {
+            glm::vec3 flashCol = glm::vec3(1.0f, 0.95f, 0.80f) * 2.2f; // bright flashlight
+            glUniform3fv(flashColLoc, 1, glm::value_ptr(flashCol));
+        }
+        // Spotlight cone: inner/outer angles and range
+        if (flashInnerLoc >= 0) glUniform1f(flashInnerLoc, cosf(glm::radians(12.0f)));
+        if (flashOuterLoc >= 0) glUniform1f(flashOuterLoc, cosf(glm::radians(20.0f)));
+        if (flashRangeLoc >= 0) glUniform1f(flashRangeLoc, 60.0f);
+        if (lightDirLoc >= 0) glUniform3fv(lightDirLoc, 1, glm::value_ptr(lightDir));
+        if (lightColorLoc >= 0) glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
+        if (viewPosLoc >= 0) glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
 
         // Terrain
         {
@@ -1176,7 +1261,7 @@ int main()
             glBindVertexArray(0);
         }
 
-        // Flashlight (rendered in hand)
+        // Flashlight
         if (hasFlashlight)
         {
             glActiveTexture(GL_TEXTURE0);
@@ -1186,7 +1271,7 @@ int main()
             glm::vec3 camRight = glm::normalize(glm::cross(camForward, cameraUp));
             glm::vec3 camUp = glm::normalize(glm::cross(camRight, camForward));
 
-            // Tune these offsets to taste (right, up, forward)
+			// Flashlight position at hand
             const float handRight = 0.40f;
             const float handUp = -0.28f;
             const float handForward = 0.30f;
@@ -1245,7 +1330,7 @@ int main()
             glm::vec3 sunColor = glm::vec3(1.0f, 0.95f, 0.75f);
             glm::vec3 moonColor = glm::vec3(0.75f, 0.85f, 1.0f);
 
-            float sunSize = 80.0f;  // Minecraft vibe
+            float sunSize = 80.0f;
             float moonSize = 70.0f;
 
             float fadeLook = lookUpFade(cameraFront);
