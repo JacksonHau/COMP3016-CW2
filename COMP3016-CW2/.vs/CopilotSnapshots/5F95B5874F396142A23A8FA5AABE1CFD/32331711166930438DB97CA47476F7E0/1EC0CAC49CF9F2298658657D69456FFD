@@ -1,0 +1,1513 @@
+﻿#include <iostream>
+#include <vector>
+#include <cmath>
+#include <string>
+#include <algorithm>
+#include <random>
+
+#define NOMINMAX
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+// ASSIMP
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+// stb_image for texture loading
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+// Audio on Windows
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+#endif
+
+// Globals
+static const int WIDTH = 1280;
+static const int HEIGHT = 720;
+
+GLFWwindow* gWindow = nullptr;
+
+// framebuffer size (can differ from window size with DPI / fullscreen)
+int gFBWidth = WIDTH;
+int gFBHeight = HEIGHT;
+
+// Camera state
+glm::vec3 cameraPos = glm::vec3(0.0f, 3.0f, 8.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, -0.3f, -1.0f);
+glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+float yaw = -90.0f;
+float pitch = -15.0f;
+
+double lastX = WIDTH * 0.5;
+double lastY = HEIGHT * 0.5;
+
+bool firstMouse = true;
+bool mouseLocked = true;
+
+// timing
+float deltaTime = 0.0f;
+float lastFrame = 0.0f;
+
+// keep player inside terrain
+float worldLimit = 50.0f;
+
+// fullscreen toggle state
+bool fullscreen = false;
+int  windowedX = 100;
+int  windowedY = 100;
+int  windowedW = WIDTH;
+int  windowedH = HEIGHT;
+
+// Terrain settings
+int   gTerrainSize = 100;   // quads per side
+float gTerrainStep = 1.0f;  // spacing
+float gHeightScale = 1.5f;  // hills
+
+// Player movement & physics
+float walkSpeed = 5.0f;
+float runMultiplier = 2.0f;
+float gravity = 20.0f;
+float jumpSpeed = 8.0f;
+float verticalVelocity = 0.0f;
+bool  isGrounded = false;
+float eyeHeight = 1.5f;
+
+// Match rendering scales
+const float TREE_RENDER_SCALE = 2.0f;
+const float ROCK_RENDER_SCALE = 1.0f;
+
+// Base collision sizes for the *unscaled* model
+float treeCollisionBaseRadius = 0.55f;
+float rockCollisionBaseRadius = 0.60f;
+
+// Collision
+float playerRadius = 0.45f;
+
+// Approx radii in world units
+float treeCollisionRadius = 0.55f;
+float rockCollisionRadius = 0.60f;
+
+// Scene instances
+struct SceneInstance
+{
+    glm::vec3 pos{ 0.0f };
+    float rotY = 0.0f;
+    float scale = 1.0f;
+};
+
+// Instances for collisions + rendering (populated in main)
+static std::vector<SceneInstance> treeInstances;
+static std::vector<SceneInstance> rockInstances;
+
+// Day/Night cycle
+bool  gDayNightEnabled = true;
+float gCycleSeconds = 60.0f;  // full day length in seconds
+float gTimeScale = 1.0f;    // speed multiplier
+
+// Flashlight state
+bool flashlightOn = false; // starts off
+
+// Ambient sound state
+bool gAmbientIsNight = false;
+bool gAmbientPlaying = false;
+
+#ifdef _WIN32
+static void playFlashlightSound(bool on)
+{
+    const char* base = "assets/audio/";
+    const char* candidatesOn[] = { "Flashlight.wav" };
+    const char* candidatesOff[] = { "Flashlight.wav" };
+
+    const char** list = on ? candidatesOn : candidatesOff;
+    int count = sizeof(candidatesOn) / sizeof(candidatesOn[0]);
+    if (!on)
+        count = sizeof(candidatesOff) / sizeof(candidatesOff[0]);
+
+    char path[512];
+    for (int i = 0; i < count; ++i)
+    {
+        snprintf(path, sizeof(path), "%s%s", base, list[i]);
+        // Use SND_NOSTOP so short UI sounds won't interrupt the ambient loop.
+        // PlaySound can only play one waveform at a time per process; using SND_NOSTOP
+        // avoids stopping an already-playing ambient sound.
+        if (PlaySoundA(path, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT | SND_NOSTOP))
+            return;
+    }
+}
+#endif
+
+// Helpers
+static float clamp01(float v)
+{
+    return (std::max)(0.0f, (std::min)(1.0f, v));
+}
+
+static float smoothstepf(float edge0, float edge1, float x)
+{
+    x = clamp01((x - edge0) / (edge1 - edge0));
+    return x * x * (3.0f - 2.0f * x);
+}
+
+static glm::vec3 lerp3(const glm::vec3& a, const glm::vec3& b, float t)
+{
+    return a + t * (b - a);
+}
+
+static void computeDayNight(float t,
+    glm::vec3& outLightDir,
+    glm::vec3& outLightColor,
+    glm::vec3& outSkyColor)
+{
+    const float TWO_PI = 6.28318530718f;
+
+    float angle = t * TWO_PI;
+
+    // Sun "position" around a circle
+    glm::vec3 sunPos = glm::normalize(glm::vec3(cosf(angle), sinf(angle), 0.25f));
+
+    // uLightDir points "down-ish"
+    outLightDir = glm::normalize(glm::vec3(sunPos.x, -sunPos.y, sunPos.z));
+
+    float sunHeight = sunPos.y;
+
+    float day = smoothstepf(-0.10f, 0.20f, sunHeight);
+
+    float horizon = 1.0f - clamp01(fabsf(sunHeight) / 0.6f);
+    horizon = clamp01(horizon);
+    horizon = horizon * horizon;
+
+    glm::vec3 nightLight = glm::vec3(0.08f, 0.10f, 0.18f);
+    glm::vec3 noonLight = glm::vec3(1.00f, 0.97f, 0.90f);
+    glm::vec3 warmLight = glm::vec3(1.00f, 0.55f, 0.25f);
+
+    glm::vec3 dayLight = lerp3(noonLight, warmLight, horizon);
+    glm::vec3 baseLight = lerp3(nightLight, dayLight, day);
+
+    float intensity = 0.20f + day * (1.0f - 0.20f);
+    outLightColor = baseLight * intensity;
+
+    glm::vec3 nightSky = glm::vec3(0.02f, 0.03f, 0.07f);
+    glm::vec3 daySky = glm::vec3(0.45f, 0.70f, 0.95f);
+    glm::vec3 dawnSky = glm::vec3(0.65f, 0.35f, 0.25f);
+
+    glm::vec3 skyDay = lerp3(daySky, dawnSky, horizon * 0.85f);
+    outSkyColor = lerp3(nightSky, skyDay, day);
+}
+
+// Billboard model for sun/moon (faces camera)
+static glm::mat4 makeBillboardModel(const glm::vec3& worldPos, float size, const glm::mat4& view)
+{
+    glm::mat4 model(1.0f);
+    model = glm::translate(model, worldPos);
+
+    glm::mat3 rot = glm::mat3(view);
+    glm::mat3 invRot = glm::transpose(rot);
+
+    model *= glm::mat4(invRot);
+    model = glm::scale(model, glm::vec3(size));
+    return model;
+}
+
+static float horizonFade(const glm::vec3& worldPos, const glm::mat4& view, const glm::mat4& proj)
+{
+    glm::vec4 clip = proj * view * glm::vec4(worldPos, 1.0f);
+    if (clip.w <= 0.0001f) return 0.0f; 
+
+    float ndcY = clip.y / clip.w; 
+    return smoothstepf(-0.10f, 0.25f, ndcY);
+}
+
+static float lookUpFade(const glm::vec3& camFront)
+{
+    return smoothstepf(-0.15f, 0.20f, camFront.y);
+}
+
+// Shaders main 
+const char* vertexShaderSource = R"(
+#version 330 core
+
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoord;
+
+uniform mat4 u_Model;
+uniform mat4 u_MVP;
+
+out vec3 FragPos;
+out vec3 Normal;
+out vec2 TexCoord;
+
+void main()
+{
+    gl_Position = u_MVP * vec4(aPos, 1.0);
+    FragPos = vec3(u_Model * vec4(aPos, 1.0));
+    Normal  = mat3(transpose(inverse(u_Model))) * aNormal;
+    TexCoord = aTexCoord;
+}
+)";
+
+const char* fragmentShaderSource = R"(
+#version 330 core
+
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoord;
+
+out vec4 FragColor;
+
+uniform sampler2D uTexture;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uViewPos;
+
+// Flashlight uniforms (spotlight)
+uniform float uFlashOn;
+uniform vec3 uFlashPos;
+uniform vec3 uFlashDir;
+uniform vec3 uFlashColor;
+uniform float uFlashInnerCos;
+uniform float uFlashOuterCos;
+uniform float uFlashRange;
+
+void main()
+{
+    vec4 texSample = texture(uTexture, TexCoord);
+    if (texSample.a < 0.1) discard;
+
+    vec3 norm     = normalize(Normal);
+    vec3 lightDir = normalize(-uLightDir);
+    float diff    = max(dot(norm, lightDir), 0.0);
+
+    vec3 viewDir    = normalize(uViewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec      = pow(max(dot(viewDir, reflectDir), 0.0), 16.0);
+
+    vec3 ambient  = 0.30 * uLightColor;
+    vec3 diffuse  = 0.70 * diff * uLightColor;
+    vec3 specular = 0.20 * spec * uLightColor;
+
+    vec3 result = (ambient + diffuse + specular) * texSample.rgb;
+
+    if (uFlashOn > 0.5)
+    {
+        // Vector from flashlight to fragment
+        vec3 LtoF = FragPos - uFlashPos; // from light to fragment
+        float dist = length(LtoF);
+
+        if (dist < uFlashRange)
+        {
+            vec3 Ldir = normalize(LtoF);
+            // spot factor by angle: dot between spot direction and vector to fragment
+            float cosTheta = dot(normalize(uFlashDir), Ldir);
+            float spot = smoothstep(uFlashOuterCos, uFlashInnerCos, cosTheta);
+
+            // attenuation by distance (soft inverse-square approximation)
+            float atten = 1.0 / (1.0 + 0.05 * dist * dist);
+
+            // lighting terms using light direction from fragment to light
+            vec3 L = normalize(uFlashPos - FragPos); // direction towards light
+            float fdiff = max(dot(norm, L), 0.0);
+            vec3 freflect = reflect(-L, norm);
+            float fspec = pow(max(dot(viewDir, freflect), 0.0), 32.0);
+
+            vec3 fDiffuse = 1.0 * fdiff * uFlashColor;
+            vec3 fSpec = 0.6 * fspec * uFlashColor;
+
+            float spotAtten = spot * atten;
+            result += (fDiffuse + fSpec) * spotAtten * texSample.rgb;
+        }
+    }
+
+    FragColor = vec4(result, texSample.a);
+}
+)";
+
+// Shaders  billboards 
+const char* billboardVert = R"(
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec2 aUV;
+
+uniform mat4 u_MVP;
+out vec2 vUV;
+
+void main() {
+    vUV = aUV;
+    gl_Position = u_MVP * vec4(aPos, 1.0);
+}
+)";
+
+const char* billboardFrag = R"(
+#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform vec3 uColor;
+uniform float uSoftness;
+uniform float uAlpha;
+
+void main() {
+    vec2 p = vUV - vec2(0.5);
+    float r = length(p);
+
+    float radius = 0.48;
+    float mask = 1.0 - smoothstep(radius - uSoftness, radius + uSoftness, r);
+
+    float a = mask * uAlpha;
+    if (a < 0.01) discard;
+
+    FragColor = vec4(uColor, a);
+}
+)";
+
+GLuint compileShader(GLenum type, const char* source)
+{
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+
+    GLint success = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        char infoLog[512];
+        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
+        std::cerr << "Shader compilation failed: " << infoLog << "\n";
+    }
+    return shader;
+}
+
+GLuint createShaderProgram()
+{
+    GLuint vert = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
+    GLuint frag = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vert);
+    glAttachShader(program, frag);
+    glLinkProgram(program);
+
+    GLint success = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        char infoLog[512];
+        glGetProgramInfoLog(program, 512, nullptr, infoLog);
+        std::cerr << "Program linking failed: " << infoLog << "\n";
+    }
+
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+    return program;
+}
+
+GLuint createBillboardProgram()
+{
+    GLuint vert = compileShader(GL_VERTEX_SHADER, billboardVert);
+    GLuint frag = compileShader(GL_FRAGMENT_SHADER, billboardFrag);
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vert);
+    glAttachShader(program, frag);
+    glLinkProgram(program);
+
+    GLint success = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        char infoLog[512];
+        glGetProgramInfoLog(program, 512, nullptr, infoLog);
+        std::cerr << "Billboard linking failed: " << infoLog << "\n";
+    }
+
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+    return program;
+}
+
+// Terrain generation
+float sampleTerrainHeight(float worldX, float worldZ)
+{
+    float h =
+        sinf(worldX * 0.2f) * cosf(worldZ * 0.2f) * gHeightScale +
+        sinf(worldX * 0.05f + worldZ * 0.1f) * gHeightScale * 0.5f;
+    return h;
+}
+
+void generateTerrain(int size, float spacing,
+    std::vector<float>& vertices,
+    std::vector<unsigned int>& indices)
+{
+    vertices.clear();
+    indices.clear();
+
+    int gridSize = size;
+    int vertPerSide = gridSize + 1;
+    int vertCount = vertPerSide * vertPerSide;
+
+    std::vector<glm::vec3> positions(vertCount);
+    std::vector<glm::vec3> normals(vertCount, glm::vec3(0.0f));
+    std::vector<glm::vec2> uvs(vertCount);
+
+    float uvScale = 0.2f;
+
+    for (int z = 0; z < vertPerSide; ++z)
+    {
+        for (int x = 0; x < vertPerSide; ++x)
+        {
+            int i = z * vertPerSide + x;
+
+            float worldX = (x - gridSize / 2.0f) * spacing;
+            float worldZ = (z - gridSize / 2.0f) * spacing;
+            float h = sampleTerrainHeight(worldX, worldZ);
+
+            positions[i] = glm::vec3(worldX, h, worldZ);
+            uvs[i] = glm::vec2(worldX * uvScale, worldZ * uvScale);
+        }
+    }
+
+    for (int z = 0; z < vertPerSide; ++z)
+    {
+        for (int x = 0; x < vertPerSide; ++x)
+        {
+            int i = z * vertPerSide + x;
+
+            int xL = std::max(x - 1, 0);
+            int xR = std::min(x + 1, gridSize);
+            int zD = std::max(z - 1, 0);
+            int zU = std::min(z + 1, gridSize);
+
+            glm::vec3 left = positions[z * vertPerSide + xL];
+            glm::vec3 right = positions[z * vertPerSide + xR];
+            glm::vec3 down = positions[zD * vertPerSide + x];
+            glm::vec3 up = positions[zU * vertPerSide + x];
+
+            glm::vec3 dx = right - left;
+            glm::vec3 dz = up - down;
+
+            normals[i] = glm::normalize(glm::cross(dz, dx));
+        }
+    }
+
+    vertices.reserve(vertCount * 8);
+    for (int i = 0; i < vertCount; ++i)
+    {
+        vertices.push_back(positions[i].x);
+        vertices.push_back(positions[i].y);
+        vertices.push_back(positions[i].z);
+
+        vertices.push_back(normals[i].x);
+        vertices.push_back(normals[i].y);
+        vertices.push_back(normals[i].z);
+
+        vertices.push_back(uvs[i].x);
+        vertices.push_back(uvs[i].y);
+    }
+
+    for (int z = 0; z < gridSize; ++z)
+    {
+        for (int x = 0; x < gridSize; ++x)
+        {
+            int topLeft = z * vertPerSide + x;
+            int topRight = z * vertPerSide + x + 1;
+            int bottomLeft = (z + 1) * vertPerSide + x;
+            int bottomRight = (z + 1) * vertPerSide + x + 1;
+
+            indices.push_back(topLeft);
+            indices.push_back(bottomLeft);
+            indices.push_back(topRight);
+
+            indices.push_back(topRight);
+            indices.push_back(bottomLeft);
+            indices.push_back(bottomRight);
+        }
+    }
+}
+
+// Fullscreen toggle
+void toggleFullscreen()
+{
+    fullscreen = !fullscreen;
+
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+
+    if (fullscreen)
+    {
+        glfwGetWindowPos(gWindow, &windowedX, &windowedY);
+        glfwGetWindowSize(gWindow, &windowedW, &windowedH);
+
+        glfwSetWindowMonitor(gWindow, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+        glfwSwapInterval(1);
+    }
+    else
+    {
+        glfwSetWindowMonitor(gWindow, nullptr, windowedX, windowedY, windowedW, windowedH, 0);
+        glfwSwapInterval(1);
+    }
+}
+
+// Callbacks
+void framebuffer_size_callback(GLFWwindow*, int w, int h)
+{
+    gFBWidth = w;
+    gFBHeight = h;
+    glViewport(0, 0, w, h);
+}
+
+void cursor_pos_callback(GLFWwindow*, double xpos, double ypos)
+{
+    if (!mouseLocked) return;
+
+    if (firstMouse)
+    {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = static_cast<float>(xpos - lastX);
+    float yoffset = static_cast<float>(lastY - ypos);
+
+    lastX = xpos;
+    lastY = ypos;
+
+    float sensitivity = 0.1f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    yaw += xoffset;
+    pitch += yoffset;
+
+    pitch = std::max(-89.0f, std::min(89.0f, pitch));
+
+    glm::vec3 front;
+    front.x = cosf(glm::radians(yaw)) * cosf(glm::radians(pitch));
+    front.y = sinf(glm::radians(pitch));
+    front.z = sinf(glm::radians(yaw)) * cosf(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+}
+
+void key_callback(GLFWwindow* window, int key, int, int action, int)
+{
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+    {
+        if (mouseLocked)
+        {
+            mouseLocked = false;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
+        else
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    }
+
+    if (key == GLFW_KEY_F11 && action == GLFW_PRESS)
+        toggleFullscreen();
+
+    if (key == GLFW_KEY_N && action == GLFW_PRESS)
+        gDayNightEnabled = !gDayNightEnabled;
+
+    if (key == GLFW_KEY_K && action == GLFW_PRESS)
+        gTimeScale = std::min(10.0f, gTimeScale + 0.25f);
+
+    if (key == GLFW_KEY_J && action == GLFW_PRESS)
+        gTimeScale = std::max(0.25f, gTimeScale - 0.25f);
+
+    // Toggle flashlight
+    if (key == GLFW_KEY_F && action == GLFW_PRESS)
+    {
+        flashlightOn = !flashlightOn;
+        std::cout << "Flashlight: " << (flashlightOn ? "ON" : "OFF") << "\n";
+
+#ifdef _WIN32
+        playFlashlightSound(flashlightOn);
+#endif
+    }
+}
+
+void mouse_button_callback(GLFWwindow* window, int button, int action, int)
+{
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
+    {
+        if (!mouseLocked)
+        {
+            mouseLocked = true;
+            firstMouse = true;
+
+            double cx, cy;
+            glfwGetCursorPos(window, &cx, &cy);
+            lastX = cx;
+            lastY = cy;
+
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
+    }
+}
+
+void window_focus_callback(GLFWwindow*, int focused)
+{
+    if (focused && mouseLocked)
+    {
+        firstMouse = true;
+        glfwSetInputMode(gWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    }
+}
+
+static void resolveCircleCollisions(
+    glm::vec3& playerPos,
+    const std::vector<SceneInstance>& trees,
+    const std::vector<SceneInstance>& rocks,
+    float playerRadius,
+    float treeBaseRadius,
+    float rockBaseRadius,
+    float treeRenderScale,
+    float rockRenderScale)
+{
+    glm::vec2 p(playerPos.x, playerPos.z);
+
+    auto pushOut = [&](const SceneInstance& inst, float baseR, float renderScale)
+        {
+            glm::vec2 c(inst.pos.x, inst.pos.z);
+
+            float r = baseR * (renderScale * inst.scale);
+
+            glm::vec2 d = p - c;
+            float dist2 = glm::dot(d, d);
+            float minR = playerRadius + r;
+
+            if (dist2 < (minR * minR) && dist2 > 0.000001f)
+            {
+                float dist = sqrtf(dist2);
+                glm::vec2 n = d / dist;
+                float penetration = (minR - dist);
+                p += n * penetration;
+            }
+            else if (dist2 <= 0.000001f)
+            {
+                p += glm::vec2(minR, 0.0f);
+            }
+        };
+
+    for (int iter = 0; iter < 2; ++iter)
+    {
+        for (const auto& t : trees) pushOut(t, treeBaseRadius, treeRenderScale);
+        for (const auto& r : rocks) pushOut(r, rockBaseRadius, rockRenderScale);
+    }
+
+    playerPos.x = p.x;
+    playerPos.z = p.y;
+}
+
+// Movement 
+void processMovement(float dt)
+{
+    float speed = walkSpeed;
+    if (glfwGetKey(gWindow, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        speed *= runMultiplier;
+
+    glm::vec3 moveDir(0.0f);
+
+    if (glfwGetKey(gWindow, GLFW_KEY_W) == GLFW_PRESS)
+        moveDir += glm::vec3(cameraFront.x, 0.0f, cameraFront.z);
+    if (glfwGetKey(gWindow, GLFW_KEY_S) == GLFW_PRESS)
+        moveDir -= glm::vec3(cameraFront.x, 0.0f, cameraFront.z);
+
+    glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+    if (glfwGetKey(gWindow, GLFW_KEY_A) == GLFW_PRESS)
+        moveDir -= glm::vec3(right.x, 0.0f, right.z);
+    if (glfwGetKey(gWindow, GLFW_KEY_D) == GLFW_PRESS)
+        moveDir += glm::vec3(right.x, 0.0f, right.z);
+
+    if (glm::length(moveDir) > 0.0f)
+        moveDir = glm::normalize(moveDir);
+
+    cameraPos += moveDir * speed * dt;
+
+    // world bounds first (optional either side)
+    cameraPos.x = std::max(-worldLimit, std::min(worldLimit, cameraPos.x));
+    cameraPos.z = std::max(-worldLimit, std::min(worldLimit, cameraPos.z));
+
+    // collide against props (trees + rocks)
+    resolveCircleCollisions(
+        cameraPos,
+        treeInstances,
+        rockInstances,
+        playerRadius,
+        treeCollisionBaseRadius,
+        rockCollisionBaseRadius,
+        TREE_RENDER_SCALE,
+        ROCK_RENDER_SCALE
+    );
+
+    // clamp again in case collision pushed you slightly out of bounds
+    cameraPos.x = std::max(-worldLimit, std::min(worldLimit, cameraPos.x));
+    cameraPos.z = std::max(-worldLimit, std::min(worldLimit, cameraPos.z));
+
+    if (glfwGetKey(gWindow, GLFW_KEY_SPACE) == GLFW_PRESS && isGrounded)
+    {
+        isGrounded = false;
+        verticalVelocity = jumpSpeed;
+    }
+
+    verticalVelocity -= gravity * dt;
+    cameraPos.y += verticalVelocity * dt;
+
+    float terrainY = sampleTerrainHeight(cameraPos.x, cameraPos.z) + eyeHeight;
+    if (cameraPos.y <= terrainY)
+    {
+        cameraPos.y = terrainY;
+        verticalVelocity = 0.0f;
+        isGrounded = true;
+    }
+}
+
+// Texture loading
+GLuint loadTexture(const char* path)
+{
+    int width, height, channels;
+    stbi_set_flip_vertically_on_load(true);
+    unsigned char* data = stbi_load(path, &width, &height, &channels, 0);
+
+    if (!data)
+    {
+        std::cerr << "Failed to load texture: " << path << "\n";
+        return 0;
+    }
+
+    GLenum format = GL_RGB;
+    if (channels == 1) format = GL_RED;
+    else if (channels == 3) format = GL_RGB;
+    else if (channels == 4) format = GL_RGBA;
+
+    GLuint texID;
+    glGenTextures(1, &texID);
+    glBindTexture(GL_TEXTURE_2D, texID);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    stbi_image_free(data);
+    return texID;
+}
+
+// Path helpers for relative textures
+static std::string getDirectory(const std::string& filepath)
+{
+    size_t slash = filepath.find_last_of("/\\");
+    if (slash == std::string::npos) return ".";
+    return filepath.substr(0, slash);
+}
+
+static std::string joinPath(const std::string& a, const std::string& b)
+{
+    if (a.empty()) return b;
+    char last = a.back();
+    if (last == '/' || last == '\\') return a + b;
+    return a + "/" + b;
+}
+
+// Mesh struct
+struct Mesh
+{
+    GLuint VAO = 0;
+    GLuint VBO = 0;
+    GLuint EBO = 0;
+    GLsizei indexCount = 0;
+    GLuint diffuseTex = 0;
+};
+
+float rotY = 0.0f;
+float scale = 1.0f;
+
+std::vector<Mesh> loadAllMeshesAssimp(const std::string& path)
+{
+    std::vector<Mesh> meshes;
+
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(
+        path,
+        aiProcess_Triangulate |
+        aiProcess_GenSmoothNormals |
+        aiProcess_JoinIdenticalVertices |
+        aiProcess_ImproveCacheLocality |
+        aiProcess_OptimizeMeshes |
+        aiProcess_FlipUVs
+    );
+
+    if (!scene || !scene->mRootNode || scene->mNumMeshes == 0)
+    {
+        std::cerr << "ASSIMP failed to load model: " << path
+            << " (" << importer.GetErrorString() << ")\n";
+        return meshes;
+    }
+
+    std::string dir = getDirectory(path);
+    meshes.reserve(scene->mNumMeshes);
+
+    for (unsigned int m = 0; m < scene->mNumMeshes; ++m)
+    {
+        const aiMesh* aMesh = scene->mMeshes[m];
+        Mesh mesh;
+
+        std::vector<float> vertices;
+        std::vector<unsigned int> indices;
+
+        vertices.reserve(aMesh->mNumVertices * 8);
+
+        for (unsigned int i = 0; i < aMesh->mNumVertices; ++i)
+        {
+            const aiVector3D& pos = aMesh->mVertices[i];
+
+            aiVector3D norm(0, 1, 0);
+            if (aMesh->HasNormals()) norm = aMesh->mNormals[i];
+
+            aiVector3D uv(0, 0, 0);
+            if (aMesh->HasTextureCoords(0)) uv = aMesh->mTextureCoords[0][i];
+
+            vertices.push_back(pos.x); vertices.push_back(pos.y); vertices.push_back(pos.z);
+            vertices.push_back(norm.x); vertices.push_back(norm.y); vertices.push_back(norm.z);
+            vertices.push_back(uv.x);   vertices.push_back(uv.y);
+        }
+
+        for (unsigned int f = 0; f < aMesh->mNumFaces; ++f)
+        {
+            const aiFace& face = aMesh->mFaces[f];
+            if (face.mNumIndices != 3) continue;
+            indices.push_back(face.mIndices[0]);
+            indices.push_back(face.mIndices[1]);
+            indices.push_back(face.mIndices[2]);
+        }
+
+        mesh.indexCount = (GLsizei)indices.size();
+
+        glGenVertexArrays(1, &mesh.VAO);
+        glGenBuffers(1, &mesh.VBO);
+        glGenBuffers(1, &mesh.EBO);
+
+        glBindVertexArray(mesh.VAO);
+
+        glBindBuffer(GL_ARRAY_BUFFER, mesh.VBO);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+
+        glBindVertexArray(0);
+
+        if (aMesh->mMaterialIndex >= 0 && scene->mNumMaterials > 0)
+        {
+            aiMaterial* mat = scene->mMaterials[aMesh->mMaterialIndex];
+            aiString texPath;
+            if (mat && mat->GetTextureCount(aiTextureType_DIFFUSE) > 0 &&
+                mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) == AI_SUCCESS)
+            {
+                std::string fullPath = joinPath(dir, texPath.C_Str());
+                mesh.diffuseTex = loadTexture(fullPath.c_str());
+            }
+        }
+
+        meshes.push_back(mesh);
+    }
+
+    return meshes;
+}
+
+// Ambient sound
+#ifdef _WIN32
+static void StartAmbient(bool night)
+{
+    // Stop whatever is playing first
+    PlaySound(NULL, NULL, 0);
+
+    const char* path = night ? "assets/audio/Night.wav" : "assets/audio/Day.wav";
+
+    // Loop in the background
+    PlaySoundA(path, NULL, SND_FILENAME | SND_ASYNC | SND_LOOP);
+
+    gAmbientIsNight = night;
+    gAmbientPlaying = true;
+}
+
+static void StopAmbient()
+{
+    PlaySound(NULL, NULL, 0);
+    gAmbientPlaying = false;
+}
+#else
+static void StartAmbient(bool) { }
+static void StopAmbient() { }
+#endif
+
+// Main
+int main()
+{
+    if (!glfwInit())
+    {
+        std::cerr << "GLFW init failed\n";
+        return 1;
+    }
+
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
+
+    gWindow = glfwCreateWindow(WIDTH, HEIGHT, "Interactive 3D Scene Explorer", nullptr, nullptr);
+    if (!gWindow)
+    {
+        glfwTerminate();
+        return 1;
+    }
+
+    glfwMakeContextCurrent(gWindow);
+    glfwSwapInterval(1);
+
+    glfwSetFramebufferSizeCallback(gWindow, framebuffer_size_callback);
+    glfwSetCursorPosCallback(gWindow, cursor_pos_callback);
+    glfwSetKeyCallback(gWindow, key_callback);
+    glfwSetMouseButtonCallback(gWindow, mouse_button_callback);
+    glfwSetWindowFocusCallback(gWindow, window_focus_callback);
+    glfwSetInputMode(gWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    glewExperimental = GL_TRUE;
+    if (glewInit() != GLEW_OK)
+    {
+        glfwDestroyWindow(gWindow);
+        glfwTerminate();
+        return 1;
+    }
+
+    glfwGetFramebufferSize(gWindow, &gFBWidth, &gFBHeight);
+    glViewport(0, 0, gFBWidth, gFBHeight);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    GLuint shaderProgram = createShaderProgram();
+    GLuint billboardProgram = createBillboardProgram();
+
+    // Billboard quad VAO
+    GLuint bbVAO = 0, bbVBO = 0, bbEBO = 0;
+    {
+        float quad[] = {
+            -0.5f, -0.5f, 0.0f,  0.0f, 0.0f,
+             0.5f, -0.5f, 0.0f,  1.0f, 0.0f,
+             0.5f,  0.5f, 0.0f,  1.0f, 1.0f,
+            -0.5f,  0.5f, 0.0f,  0.0f, 1.0f
+        };
+        unsigned int idx[] = { 0,1,2, 2,3,0 };
+
+        glGenVertexArrays(1, &bbVAO);
+        glGenBuffers(1, &bbVBO);
+        glGenBuffers(1, &bbEBO);
+
+        glBindVertexArray(bbVAO);
+
+        glBindBuffer(GL_ARRAY_BUFFER, bbVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bbEBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+
+        glBindVertexArray(0);
+    }
+
+    // Terrain
+    std::vector<float> terrainVertices;
+    std::vector<unsigned int> terrainIndices;
+    generateTerrain(gTerrainSize, gTerrainStep, terrainVertices, terrainIndices);
+
+    worldLimit = gTerrainSize * gTerrainStep * 0.5f - 2.0f;
+
+    GLuint terrainVAO = 0, terrainVBO = 0, terrainEBO = 0;
+    glGenVertexArrays(1, &terrainVAO);
+    glGenBuffers(1, &terrainVBO);
+    glGenBuffers(1, &terrainEBO);
+
+    glBindVertexArray(terrainVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, terrainVBO);
+    glBufferData(GL_ARRAY_BUFFER, terrainVertices.size() * sizeof(float), terrainVertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, terrainEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, terrainIndices.size() * sizeof(unsigned int), terrainIndices.data(), GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
+    glBindVertexArray(0);
+
+    // Assets
+    GLuint grassTex = loadTexture("assets/grass.png");
+    std::vector<Mesh> treeMeshes = loadAllMeshesAssimp("assets/tree.obj");
+    bool hasTree = !treeMeshes.empty();
+
+    std::vector<Mesh> rockMeshes = loadAllMeshesAssimp("assets/rock.obj");
+    bool hasRock = !rockMeshes.empty();
+
+    // Flashlight 
+    std::vector<Mesh> flashlightMeshes = loadAllMeshesAssimp("assets/Flashlight.obj");
+    bool hasFlashlight = !flashlightMeshes.empty();
+    GLuint flashlightBaseTex = loadTexture("assets/textures/T_Flashlight_V01_BaseColor-T_Flashlight_V01_Opacity.png");
+
+    // Place camera on terrain
+    cameraPos.y = sampleTerrainHeight(cameraPos.x, cameraPos.z) + eyeHeight;
+    isGrounded = true;
+
+    // Procedural placement: trees + rocks (simple, deterministic scatter)
+    {
+        std::mt19937 rng(1337u);
+        std::uniform_real_distribution<float> distXZ(-worldLimit, worldLimit);
+        std::uniform_real_distribution<float> distRot(0.0f, 6.2831853f);
+        std::uniform_real_distribution<float> distTreeS(0.7f, 1.2f);
+        std::uniform_real_distribution<float> distRockS(0.4f, 0.9f);
+
+        auto farFromSpawn = [&](float x, float z)
+            {
+                glm::vec2 p(x, z);
+                glm::vec2 spawn(cameraPos.x, cameraPos.z);
+                return glm::distance(p, spawn) > 6.0f;
+            };
+
+        if (hasTree)
+        {
+            const int TREE_COUNT = 30;
+            treeInstances.reserve(TREE_COUNT);
+
+            for (int i = 0; i < TREE_COUNT; ++i)
+            {
+                float x = distXZ(rng);
+                float z = distXZ(rng);
+
+                for (int r = 0; r < 6 && !farFromSpawn(x, z); ++r)
+                {
+                    x = distXZ(rng);
+                    z = distXZ(rng);
+                }
+
+                float y = sampleTerrainHeight(x, z);
+
+                SceneInstance inst;
+                inst.pos = glm::vec3(x, y, z);
+                inst.rotY = distRot(rng);
+                inst.scale = distTreeS(rng);
+
+                treeInstances.push_back(inst);
+            }
+        }
+
+        if (hasRock)
+        {
+            const int ROCK_COUNT = 45;
+            rockInstances.reserve(ROCK_COUNT);
+
+            for (int i = 0; i < ROCK_COUNT; ++i)
+            {
+                float x = distXZ(rng);
+                float z = distXZ(rng);
+
+                for (int r = 0; r < 6 && !farFromSpawn(x, z); ++r)
+                {
+                    x = distXZ(rng);
+                    z = distXZ(rng);
+                }
+
+                float y = sampleTerrainHeight(x, z);
+
+                SceneInstance inst;
+                inst.pos = glm::vec3(x, y, z);
+                inst.rotY = distRot(rng);
+                inst.scale = distRockS(rng);
+
+                rockInstances.push_back(inst);
+            }
+        }
+    }
+
+    // Main shader uniforms
+    glUseProgram(shaderProgram);
+    glUniform1i(glGetUniformLocation(shaderProgram, "uTexture"), 0);
+
+    GLint lightDirLoc = glGetUniformLocation(shaderProgram, "uLightDir");
+    GLint lightColorLoc = glGetUniformLocation(shaderProgram, "uLightColor");
+    GLint viewPosLoc = glGetUniformLocation(shaderProgram, "uViewPos");
+    GLint modelLoc = glGetUniformLocation(shaderProgram, "u_Model");
+    GLint mvpLoc = glGetUniformLocation(shaderProgram, "u_MVP");
+
+    // Flashlight uniform locations
+    GLint flashOnLoc = glGetUniformLocation(shaderProgram, "uFlashOn");
+    GLint flashPosLoc = glGetUniformLocation(shaderProgram, "uFlashPos");
+    GLint flashDirLoc = glGetUniformLocation(shaderProgram, "uFlashDir");
+    GLint flashColLoc = glGetUniformLocation(shaderProgram, "uFlashColor");
+    GLint flashInnerLoc = glGetUniformLocation(shaderProgram, "uFlashInnerCos");
+    GLint flashOuterLoc = glGetUniformLocation(shaderProgram, "uFlashOuterCos");
+    GLint flashRangeLoc = glGetUniformLocation(shaderProgram, "uFlashRange");
+
+    // Billboard shader uniforms
+    GLint bbMvpLoc = glGetUniformLocation(billboardProgram, "u_MVP");
+    GLint bbColLoc = glGetUniformLocation(billboardProgram, "uColor");
+    GLint bbSoftLoc = glGetUniformLocation(billboardProgram, "uSoftness");
+    GLint bbAlphaLoc = glGetUniformLocation(billboardProgram, "uAlpha");
+
+    glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.2f));
+    glm::vec3 lightColor = glm::vec3(1.0f, 0.97f, 0.90f);
+
+    while (!glfwWindowShouldClose(gWindow))
+    {
+        float now = (float)glfwGetTime();
+        deltaTime = now - lastFrame;
+        lastFrame = now;
+
+        glfwPollEvents();
+        processMovement(deltaTime);
+
+        // View/projection
+        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+
+        float aspect = (gFBHeight > 0) ? (float)gFBWidth / (float)gFBHeight : 16.0f / 9.0f;
+        glm::mat4 projection = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
+
+        // Day/night
+        glm::vec3 skyColor(0.45f, 0.70f, 0.95f);
+        float t = 0.25f;
+
+        if (gDayNightEnabled)
+        {
+            t = fmodf(((float)glfwGetTime() * gTimeScale) / gCycleSeconds, 1.0f);
+            computeDayNight(t, lightDir, lightColor, skyColor);
+        }
+
+        // Ensure ambient audio matches current day/night state
+#ifdef _WIN32
+        {
+            const float TWO_PI = 6.28318530718f;
+            float sunHeight = sinf(t * TWO_PI);
+            float dayFactor = smoothstepf(-0.10f, 0.20f, sunHeight);
+            bool isNightNow = dayFactor < 0.5f;
+
+            if (!gAmbientPlaying || gAmbientIsNight != isNightNow)
+            {
+                StartAmbient(isNightNow);
+            }
+        }
+#endif
+
+        glClearColor(skyColor.r, skyColor.g, skyColor.b, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // Main draw
+        glUseProgram(shaderProgram);
+
+        // Compute camera-relative flashlight origin and basis so spotlight is positioned at the hand
+        glm::vec3 camForward = glm::normalize(cameraFront);
+        glm::vec3 camRight = glm::normalize(glm::cross(camForward, cameraUp));
+        glm::vec3 camUp = glm::normalize(glm::cross(camRight, camForward));
+
+        const float handRight = 0.40f;
+        const float handUp = -0.28f;
+        const float handForward = 0.30f;
+
+        glm::vec3 flashPos = cameraPos + camRight * handRight + camUp * handUp + camForward * handForward;
+        glm::vec3 flashDir = camForward;
+
+        // If flashlight is on, provide flashlight uniforms 
+        if (flashOnLoc >= 0) glUniform1f(flashOnLoc, flashlightOn ? 1.0f : 0.0f);
+        if (flashPosLoc >= 0) glUniform3fv(flashPosLoc, 1, glm::value_ptr(flashPos));
+        if (flashDirLoc >= 0) glUniform3fv(flashDirLoc, 1, glm::value_ptr(flashDir));
+        if (flashColLoc >= 0)
+        {
+            glm::vec3 flashCol = glm::vec3(1.0f, 0.95f, 0.80f) * 2.2f; // bright flashlight
+            glUniform3fv(flashColLoc, 1, glm::value_ptr(flashCol));
+        }
+        // Spotlight cone: inner/outer angles and range
+        if (flashInnerLoc >= 0) glUniform1f(flashInnerLoc, cosf(glm::radians(12.0f)));
+        if (flashOuterLoc >= 0) glUniform1f(flashOuterLoc, cosf(glm::radians(20.0f)));
+        if (flashRangeLoc >= 0) glUniform1f(flashRangeLoc, 60.0f);
+        if (lightDirLoc >= 0) glUniform3fv(lightDirLoc, 1, glm::value_ptr(lightDir));
+        if (lightColorLoc >= 0) glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
+        if (viewPosLoc >= 0) glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
+
+        // Terrain
+        {
+            glm::mat4 model(1.0f);
+            glm::mat4 mvp = projection * view * model;
+
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, grassTex);
+
+            glBindVertexArray(terrainVAO);
+            glDrawElements(GL_TRIANGLES, (GLsizei)terrainIndices.size(), GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+        }
+
+        // Trees
+        if (hasTree)
+        {
+            glActiveTexture(GL_TEXTURE0);
+
+            for (const SceneInstance& inst : treeInstances)
+            {
+                glm::mat4 model(1.0f);
+                model = glm::translate(model, inst.pos);
+                model = glm::rotate(model, inst.rotY, glm::vec3(0.0f, 1.0f, 0.0f));
+                model = glm::scale(model, glm::vec3(2.0f * inst.scale));
+
+                glm::mat4 mvp = projection * view * model;
+
+                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+                glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+
+                for (const Mesh& mm : treeMeshes)
+                {
+                    GLuint texToUse = (mm.diffuseTex != 0) ? mm.diffuseTex : ((flashlightBaseTex != 0) ? flashlightBaseTex : grassTex);
+                    glBindTexture(GL_TEXTURE_2D, texToUse);
+
+                    glBindVertexArray(mm.VAO);
+                    glDrawElements(GL_TRIANGLES, mm.indexCount, GL_UNSIGNED_INT, 0);
+                }
+            }
+            glBindVertexArray(0);
+        }
+
+        // Rocks
+        if (hasRock)
+        {
+            glActiveTexture(GL_TEXTURE0);
+
+            for (const SceneInstance& inst : rockInstances)
+            {
+                glm::mat4 model(1.0f);
+                model = glm::translate(model, inst.pos);
+                model = glm::rotate(model, inst.rotY, glm::vec3(0.0f, 1.0f, 0.0f));
+                model = glm::scale(model, glm::vec3(1.0f * inst.scale));
+
+                glm::mat4 mvp = projection * view * model;
+
+                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+                glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+
+                for (const Mesh& mm : rockMeshes)
+                {
+                    GLuint texToUse = (mm.diffuseTex != 0) ? mm.diffuseTex : ((flashlightBaseTex != 0) ? flashlightBaseTex : grassTex);
+                    glBindTexture(GL_TEXTURE_2D, texToUse);
+
+                    glBindVertexArray(mm.VAO);
+                    glDrawElements(GL_TRIANGLES, mm.indexCount, GL_UNSIGNED_INT, 0);
+                }
+            }
+            glBindVertexArray(0);
+        }
+
+        // Flashlight
+        if (hasFlashlight)
+        {
+            glActiveTexture(GL_TEXTURE0);
+
+            // Build a camera-relative transform so it stays in place on screen
+            glm::vec3 camForward = glm::normalize(cameraFront);
+            glm::vec3 camRight = glm::normalize(glm::cross(camForward, cameraUp));
+            glm::vec3 camUp = glm::normalize(glm::cross(camRight, camForward));
+
+			// Flashlight position at hand
+            const float handRight = 0.40f;
+            const float handUp = -0.28f;
+            const float handForward = 0.30f;
+
+            glm::vec3 handPos = cameraPos + camRight * handRight + camUp * handUp + camForward * handForward;
+
+            // Camera orientation basis as a matrix 
+            glm::mat4 orient(1.0f);
+            orient[0] = glm::vec4(camRight, 0.0f);
+            orient[1] = glm::vec4(camUp, 0.0f);
+            orient[2] = glm::vec4(-camForward, 0.0f); 
+
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), handPos) * orient;
+
+            model = model * glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 1, 0));
+            model = model * glm::rotate(glm::mat4(1.0f), glm::radians(-8.0f), glm::vec3(0, 0, 1));
+            model = model * glm::rotate(glm::mat4(1.0f), glm::radians(6.0f), glm::vec3(1, 0, 0));
+
+            // Flashlight size
+            const float flashlightScale = 5.0f;
+            model = model * glm::scale(glm::mat4(1.0f), glm::vec3(flashlightScale));
+
+            glm::mat4 mvp = projection * view * model;
+
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+
+            // Flashlight texture
+            glBindTexture(GL_TEXTURE_2D, flashlightBaseTex);
+
+            for (const Mesh& mm : flashlightMeshes)
+            {
+                glBindVertexArray(mm.VAO);
+                glDrawElements(GL_TRIANGLES, mm.indexCount, GL_UNSIGNED_INT, 0);
+            }
+            glBindVertexArray(0);
+        }
+
+        // Sun + Moon 
+        {
+            glm::vec3 worldCenter(0.0f, 0.0f, 0.0f);
+            float skyDist = 600.0f;
+
+            glm::vec3 sunDir = glm::normalize(-lightDir);
+            glm::vec3 moonDir = -sunDir;
+
+            glm::vec3 sunPos = worldCenter + sunDir * skyDist;
+            glm::vec3 moonPos = worldCenter + moonDir * skyDist;
+
+            sunPos.y += 250.0f;
+            moonPos.y += 250.0f;
+
+            float day = clamp01((sunDir.y + 0.1f) / 0.6f);
+            float night = 1.0f - day;
+
+            glm::vec3 sunColor = glm::vec3(1.0f, 0.95f, 0.75f);
+            glm::vec3 moonColor = glm::vec3(0.75f, 0.85f, 1.0f);
+
+            float sunSize = 80.0f;
+            float moonSize = 70.0f;
+
+            float fadeLook = lookUpFade(cameraFront);
+
+            glUseProgram(billboardProgram);
+            glBindVertexArray(bbVAO);
+
+            glDisable(GL_DEPTH_TEST);
+
+            // Sun
+            {
+                float fadeH = horizonFade(sunPos, view, projection);
+                float alpha = fadeLook * fadeH;
+                alpha *= (0.35f + 0.65f * day);
+
+                if (alpha > 0.01f)
+                {
+                    glm::mat4 model = makeBillboardModel(sunPos, sunSize, view);
+                    glm::mat4 mvp = projection * view * model;
+
+                    glUniformMatrix4fv(bbMvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+                    glUniform3fv(bbColLoc, 1, glm::value_ptr(sunColor));
+                    glUniform1f(bbSoftLoc, 0.02f);
+                    glUniform1f(bbAlphaLoc, alpha);
+
+                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+                }
+            }
+
+            // Moon
+            {
+                float fadeH = horizonFade(moonPos, view, projection);
+                float alpha = fadeLook * fadeH;
+                alpha *= (0.25f + 0.75f * night);
+
+                if (alpha > 0.01f)
+                {
+                    glm::mat4 model = makeBillboardModel(moonPos, moonSize, view);
+                    glm::mat4 mvp = projection * view * model;
+
+                    glUniformMatrix4fv(bbMvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+                    glUniform3fv(bbColLoc, 1, glm::value_ptr(moonColor));
+                    glUniform1f(bbSoftLoc, 0.03f);
+                    glUniform1f(bbAlphaLoc, alpha);
+
+                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+                }
+            }
+
+            glEnable(GL_DEPTH_TEST);
+            glBindVertexArray(0);
+        }
+
+        glfwSwapBuffers(gWindow);
+    }
+
+    // Cleanup
+    glDeleteTextures(1, &grassTex);
+
+    glDeleteVertexArrays(1, &terrainVAO);
+    glDeleteBuffers(1, &terrainVBO);
+    glDeleteBuffers(1, &terrainEBO);
+
+    for (Mesh& m : treeMeshes)
+    {
+        if (m.diffuseTex != 0) glDeleteTextures(1, &m.diffuseTex);
+        if (m.VAO != 0)
+        {
+            glDeleteVertexArrays(1, &m.VAO);
+            glDeleteBuffers(1, &m.VBO);
+            glDeleteBuffers(1, &m.EBO);
+        }
+    }
+
+    for (Mesh& m : rockMeshes)
+    {
+        if (m.diffuseTex != 0) glDeleteTextures(1, &m.diffuseTex);
+        if (m.VAO != 0)
+        {
+            glDeleteVertexArrays(1, &m.VAO);
+            glDeleteBuffers(1, &m.VBO);
+            glDeleteBuffers(1, &m.EBO);
+        }
+    }
+
+    glDeleteVertexArrays(1, &bbVAO);
+    glDeleteBuffers(1, &bbVBO);
+    glDeleteBuffers(1, &bbEBO);
+
+    glDeleteProgram(shaderProgram);
+    glDeleteProgram(billboardProgram);
+
+    glfwDestroyWindow(gWindow);
+    glfwTerminate();
+    return 0;
+}

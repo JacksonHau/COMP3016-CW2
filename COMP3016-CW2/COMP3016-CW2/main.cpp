@@ -22,6 +22,16 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+// Audio on Windows
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+#endif
+
 // Globals
 static const int WIDTH = 1280;
 static const int HEIGHT = 720;
@@ -108,6 +118,32 @@ float gTimeScale = 1.0f;    // speed multiplier
 
 // Flashlight state
 bool flashlightOn = false; // starts off
+
+// Ambient sound state
+bool gAmbientIsNight = false;
+bool gAmbientPlaying = false;
+
+#ifdef _WIN32
+static void playFlashlightSound(bool on)
+{
+    const char* base = "assets/audio/";
+    const char* candidatesOn[] = { "Flashlight.wav" };
+    const char* candidatesOff[] = { "Flashlight.wav" };
+
+    const char** list = on ? candidatesOn : candidatesOff;
+    int count = sizeof(candidatesOn) / sizeof(candidatesOn[0]);
+    if (!on)
+        count = sizeof(candidatesOff) / sizeof(candidatesOff[0]);
+
+    char path[512];
+    for (int i = 0; i < count; ++i)
+    {
+        snprintf(path, sizeof(path), "%s%s", base, list[i]);
+        if (PlaySoundA(path, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT))
+            return;
+    }
+}
+#endif
 
 // Helpers
 static float clamp01(float v)
@@ -593,6 +629,10 @@ void key_callback(GLFWwindow* window, int key, int, int action, int)
     {
         flashlightOn = !flashlightOn;
         std::cout << "Flashlight: " << (flashlightOn ? "ON" : "OFF") << "\n";
+
+#ifdef _WIN32
+        playFlashlightSound(flashlightOn);
+#endif
     }
 }
 
