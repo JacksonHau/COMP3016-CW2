@@ -22,15 +22,10 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-// Audio on Windows
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
+// Audio
 #include <windows.h>
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
-#endif
 
 // Globals
 static const int WIDTH = 1280;

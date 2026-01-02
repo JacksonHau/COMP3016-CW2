@@ -1,1 +1,9 @@
-﻿
+﻿  main.cpp
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared\minwindef.h(130,9): warning C4005: 'APIENTRY': macro redefinition
+  (compiling source file 'main.cpp')
+      G:\git\COMP3016-CW2\COMP3016-CW2\External\GLFW\glfw-3.4.bin.WIN64\include\GLFW\glfw3.h(123,11):
+      see previous definition of 'APIENTRY'
+  
+G:\git\COMP3016-CW2\COMP3016-CW2\COMP3016-CW2\main.cpp(154,13): error C2065: 'gAmbientPlaying': undeclared identifier
+G:\git\COMP3016-CW2\COMP3016-CW2\COMP3016-CW2\main.cpp(155,13): error C2065: 'gAmbientIsNight': undeclared identifier
+G:\git\COMP3016-CW2\COMP3016-CW2\COMP3016-CW2\main.cpp(160,5): error C2065: 'gAmbientPlaying': undeclared identifier
