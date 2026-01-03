@@ -49,7 +49,27 @@ Patterns used:
 - Data-Driven Rendering: Scene instances store transform data while meshes remain reusable
 
 ## Game mechanics and how they are coded
-Game mec
+Player Movement:
+- WASD controls
+- Mouse controls yaw and pitch
+- Gravity and jumping handled using vertical velocity
+- Speed modifiers for walking and running
+
+Collision System:
+- Radius-based collision checks
+- Prevents player from clipping through trees and rocks
+- World bounds clamp player inside the map
+
+Flashlight:
+- Spotlight implemented in the fragment shader
+- Toggled via keyboard input
+- Plays sound feedback on toggle
+- Positioned relative to camera
+
+Day and Night Cycle:
+- Time-based directional light rotation
+- Changes sky colour and light intensity
+- Switches ambient audio state
 
 ## UML design diagram
 ![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/UML/System%20UML.png)
