@@ -40,6 +40,9 @@ Not used for:
 
 All final code was written, tested, and integrated manually.
 
+AI declaration form:
+https://github.com/JacksonHau/COMP3016-CW2/blob/main/AI%20declaration%20form/Student%20Declaration%20of%20AI%20Tool%20use%20in%20this%20Assessment.pdf
+
 ## Game programming patterns
 Patterns used:
 - Game Loop Pattern: Update → Input → Physics → Render → Repeat
@@ -75,7 +78,16 @@ Day and Night Cycle:
 ![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/UML/System%20UML.png)
 
 ## Sample screens
-Screenshots
+Day Environment
+![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/Screenshot%20evidence/Daytime%20environment.png)
+Day with flashlight
+![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/Screenshot%20evidence/Daytime%20with%20flashlight.png)
+Night Environment
+![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/Screenshot%20evidence/Night%20environment.png)
+Night with flashlight
+![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/Screenshot%20evidence/Night%20environment%20with%20flashlight.png)
+Collisions with an object
+![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/Screenshot%20evidence/Collisions.png)
 
 ## Exception handling and test cases
 Handling
