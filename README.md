@@ -85,3 +85,19 @@ Prototype
 
 ## What you I have achieved, and what I would do differently, knowing what you now know. 
 What I achieved
+
+## Assets used
+Tree:
+https://sketchfab.com/3d-models/pine-tree-e52769d653cd4e52a4acff3041961e65
+
+Rock:
+https://sketchfab.com/3d-models/stylized-rocks-9473fba51b57482983e12ad64db9f471
+
+Flashlight:
+https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953
+
+Grass: 
+https://opengameart.org/content/grass-texture
+
+Flashlight on/off:
+https://pixabay.com/sound-effects/flashlight-clicking-on-105809/
