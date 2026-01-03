@@ -41,13 +41,18 @@ Not used for:
 All final code was written, tested, and integrated manually.
 
 ## Game programming patterns
-Game patterns
+Patterns used:
+- Game Loop Pattern: Update → Input → Physics → Render → Repeat
+- Component-like Architecture: Systems such as rendering, input, lighting, and audio are logically separated
+- State-Based Logic: Flashlight on or off
+- Day or night lighting: Mouse locked or unlocked
+- Data-Driven Rendering: Scene instances store transform data while meshes remain reusable
 
 ## Game mechanics and how they are coded
 Game mec
 
 ## UML design diagram
-UML
+![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/UML/System%20UML.png)
 
 ## Sample screens
 Screenshots
@@ -59,3 +64,4 @@ Handling
 Prototype
 
 ## What you I have achieved, and what I would do differently, knowing what you now know. 
+What I achieved
