@@ -23,9 +23,9 @@
 #include "stb_image.h"
 
 // Audio
-#include <windows.h>
-#include <mmsystem.h>
-#pragma comment(lib, "winmm.lib")
+#include <irrKlang.h>
+#pragma comment(lib, "irrKlang.lib")
+using namespace irrklang;
 
 // Globals
 static const int WIDTH = 1280;
@@ -118,27 +118,38 @@ bool flashlightOn = false; // starts off
 bool gAmbientIsNight = false;
 bool gAmbientPlaying = false;
 
-#ifdef _WIN32
+static ISoundEngine* gSoundEngine = nullptr;
+
 static void playFlashlightSound(bool on)
 {
+    if (!gSoundEngine)
+    {
+        gSoundEngine = createIrrKlangDevice();
+        if (!gSoundEngine)
+        {
+            std::cerr << "Failed to create irrKlang sound engine\n";
+            return;
+        }
+    }
+
     const char* base = "assets/audio/";
     const char* candidatesOn[] = { "Flashlight.wav" };
     const char* candidatesOff[] = { "Flashlight.wav" };
 
     const char** list = on ? candidatesOn : candidatesOff;
-    int count = sizeof(candidatesOn) / sizeof(candidatesOn[0]);
-    if (!on)
-        count = sizeof(candidatesOff) / sizeof(candidatesOff[0]);
+    int count = on ? (sizeof(candidatesOn) / sizeof(candidatesOn[0])) : (sizeof(candidatesOff) / sizeof(candidatesOff[0]));
 
     char path[512];
     for (int i = 0; i < count; ++i)
     {
         snprintf(path, sizeof(path), "%s%s", base, list[i]);
-        if (PlaySoundA(path, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT))
+        if (gSoundEngine)
+        {
+            gSoundEngine->play2D(path, false);
             return;
+        }
     }
 }
-#endif
 
 // Helpers
 static float clamp01(float v)
@@ -625,9 +636,7 @@ void key_callback(GLFWwindow* window, int key, int, int action, int)
         flashlightOn = !flashlightOn;
         std::cout << "Flashlight: " << (flashlightOn ? "ON" : "OFF") << "\n";
 
-#ifdef _WIN32
         playFlashlightSound(flashlightOn);
-#endif
     }
 }
 
@@ -1457,6 +1466,13 @@ int main()
 
     glDeleteProgram(shaderProgram);
     glDeleteProgram(billboardProgram);
+
+    // Shut down irrKlang
+    if (gSoundEngine)
+    {
+        gSoundEngine->drop();
+        gSoundEngine = nullptr;
+    }
 
     glfwDestroyWindow(gWindow);
     glfwTerminate();
