@@ -104,7 +104,18 @@ Each frame:
 This loop continues until the application is closed.
 
 ## What you I have achieved, and what I would do differently, knowing what you now know. 
-What I achieved
+Achievements
+- Fully functional 3D first-person prototype
+- Terrain generation with collision-aware movement
+- Dynamic lighting and day–night system
+- Flashlight mechanic with audio feedback
+- Clear and structured game loop
+
+What I Would Do Differently
+- Split the project into multiple source files instead of a single main file
+- Add a basic UI or instruction screen for first-time players
+- Improve collision accuracy using bounding boxes instead of radius checks
+- Add more gameplay depth such as objectives or NPC interactions
 
 ## Assets used
 Tree:
