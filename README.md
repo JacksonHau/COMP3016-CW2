@@ -20,25 +20,16 @@ The project is written in C++ with OpenGL, using the following libraries:
 - GLM – vector and matrix maths.
 - stb_image – texture loading.
 - Assimp – 3D model importing.
-- winmm (PlaySound) – basic audio playback on Windows.
+- irrKlang – Audio playback
 
 All dependencies are statically linked or bundled so the final executable runs without Visual Studio 2022.
 
 ## Use of AI
-AI tools were used as a development assistant, not as an automated code generator.
-
-Used for:
-- Debugging OpenGL errors
-- Explaining lighting math and camera logic
-- UML design interpretation
-- Refactoring advice
-
-Not used for:
-- Copy pasting full systems blindly
-- Auto-generating assets
-- Replacing understanding
-
-All final code was written, tested, and integrated manually.
+AI tools were used as development support, not as a replacement for implementation. AI assisted with:
+- Explaining OpenGL concepts and rendering pipelines
+- Debugging shader and logic errors
+- Suggesting improvements for structure and performance
+- Helping design UML diagrams and documentation
 
 AI declaration form:
 https://github.com/JacksonHau/COMP3016-CW2/blob/main/AI%20declaration%20form/Student%20Declaration%20of%20AI%20Tool%20use%20in%20this%20Assessment.pdf
@@ -64,10 +55,9 @@ Collision System:
 - World bounds clamp player inside the map
 
 Flashlight:
-- Spotlight implemented in the fragment shader
-- Toggled via keyboard input
-- Plays sound feedback on toggle
-- Positioned relative to camera
+- Toggled using a key press
+- Uses a spotlight-style light source attached to the camera
+- Plays sound effects via irrKlang when toggled
 
 Day and Night Cycle:
 - Time-based directional light rotation
@@ -90,13 +80,42 @@ Collisions with an object
 ![Image Alt](https://github.com/JacksonHau/COMP3016-CW2/blob/main/Screenshot%20evidence/Collisions.png)
 
 ## Exception handling and test cases
-Handling
+Exception Handling:
+- Shader compilation errors are checked and logged
+- Asset loading failures are reported via console output
+- Input bounds prevent camera flipping or instability
+
+Test Cases:
+- Player cannot pass through environmental objects
+- Flashlight toggles reliably on repeated presses
+- Player remains grounded on uneven terrain
+- Day–night cycle transitions smoothly without visual glitches
 
 ## How my prototype works
-Prototype
+When the application starts, the window and OpenGL context are initialised. Assets such as shaders, models, and textures are loaded before entering the main game loop.
+
+Each frame:
+1. User input is processed
+2. Player movement and collision are updated
+3. Environmental systems such as lighting are recalculated
+4. The scene is rendered
+5. Audio states are updated
+
+This loop continues until the application is closed.
 
 ## What you I have achieved, and what I would do differently, knowing what you now know. 
-What I achieved
+Achievements
+- Fully functional 3D first-person prototype
+- Terrain generation with collision-aware movement
+- Dynamic lighting and day–night system
+- Flashlight mechanic with audio feedback
+- Clear and structured game loop
+
+What I Would Do Differently
+- Split the project into multiple source files instead of a single main file
+- Add a basic UI or instruction screen for first-time players
+- Improve collision accuracy using bounding boxes instead of radius checks
+- Add more gameplay depth such as objectives or NPC interactions
 
 ## Assets used
 Tree:
