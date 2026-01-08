@@ -1,7 +1,7 @@
 # COMP3016-CW2
 
 ## Youtube Link
-(https://youtu.be/mOGbZOc-TKM)
+https://youtu.be/mOGbZOc-TKM
 
 ## Gameplay description
 The prototype is a first-person exploration game set in an outdoor environment with terrain, scattered props, and dynamic lighting.
