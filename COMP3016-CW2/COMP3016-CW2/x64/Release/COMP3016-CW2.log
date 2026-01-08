@@ -1,1 +1,9 @@
-﻿
+﻿  main.cpp
+  Generating code
+  1 of 744 functions ( 0.1%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    7 functions had inline decision re-evaluated but remain unchanged
+  Finished generating code
+  COMP3016-CW2.vcxproj -> G:\git\COMP3016-CW2\COMP3016-CW2\x64\Release\COMP3016-CW2.exe
+  'pwsh.exe' is not recognized as an internal or external command,
+  operable program or batch file.
